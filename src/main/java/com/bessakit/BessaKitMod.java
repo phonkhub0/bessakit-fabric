@@ -14,6 +14,7 @@ import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.math.Direction;
+import net.minecraft.text.Text;
 
 import java.util.LinkedList;
 import java.util.Queue;
@@ -51,19 +52,35 @@ public class BessaKitMod implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
+        debug("Mod loaded, watching for " + BessaKitConfig.TRIGGER_PHRASE);
+
         // Listen for the trigger phrase in chat
         ClientReceiveMessageEvents.ALLOW_GAME.register((message, overlay) -> {
             String text = message.getString();
+            debug("Saw chat line: " + text);
             if (TRIGGER.matcher(text).find()) {
+                debug("Trigger matched!");
                 String username = extractUsername(text);
                 if (username != null) {
+                    debug("Resolved sender as: " + username + " (queued)");
                     requestQueue.add(username);
+                } else {
+                    debug("Could NOT resolve a username from that message - no online player name found inside it.");
                 }
             }
             return true; // don't block the message from showing
         });
 
         ClientTickEvents.END_CLIENT_TICK.register(this::tick);
+    }
+
+    /** Prints a debug line to your own local chat (not sent to the server). */
+    private static void debug(String msg) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.player != null) {
+            client.player.sendMessage(Text.literal("[BessaKit] " + msg), false);
+        }
+        System.out.println("[BessaKit] " + msg);
     }
 
     /**
@@ -91,12 +108,14 @@ public class BessaKitMod implements ClientModInitializer {
             case IDLE -> {
                 if (!requestQueue.isEmpty()) {
                     currentTarget = requestQueue.poll();
+                    debug("Starting delivery for " + currentTarget + ", searching for chest named '" + BessaKitConfig.CHEST_NAME + "'...");
                     chestPos = ChestFinder.findKitsChest();
                     if (chestPos == null) {
-                        // no chest found, skip this request
+                        debug("No chest named '" + BessaKitConfig.CHEST_NAME + "' found within " + BessaKitConfig.CHEST_SEARCH_RADIUS + " blocks. Aborting this request.");
                         currentTarget = null;
                         break;
                     }
+                    debug("Found chest at " + chestPos + ", walking there.");
                     navigator.reset();
                     state = State.WALK_TO_CHEST;
                 }
