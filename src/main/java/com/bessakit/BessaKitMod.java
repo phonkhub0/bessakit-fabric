@@ -10,7 +10,6 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.screen.GenericContainerScreenHandler;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.math.Direction;
@@ -57,6 +56,8 @@ public class BessaKitMod implements ClientModInitializer {
         // Listen for the trigger phrase in chat
         ClientReceiveMessageEvents.ALLOW_GAME.register((message, overlay) -> {
             String text = message.getString();
+            if (text.startsWith("[BessaKit]")) return true; // never process our own debug output
+
             debug("Saw chat line: " + text);
             if (TRIGGER.matcher(text).find()) {
                 debug("Trigger matched!");
@@ -74,11 +75,11 @@ public class BessaKitMod implements ClientModInitializer {
         ClientTickEvents.END_CLIENT_TICK.register(this::tick);
     }
 
-    /** Prints a debug line to your own local chat (not sent to the server). */
+    /** Prints a debug line straight to the chat HUD, bypassing the chat-received event pipeline entirely. */
     private static void debug(String msg) {
         MinecraftClient client = MinecraftClient.getInstance();
-        if (client.player != null) {
-            client.player.sendMessage(Text.literal("[BessaKit] " + msg), false);
+        if (client.inGameHud != null) {
+            client.inGameHud.getChatHud().addMessage(Text.literal("[BessaKit] " + msg));
         }
         System.out.println("[BessaKit] " + msg);
     }
@@ -124,6 +125,7 @@ public class BessaKitMod implements ClientModInitializer {
             case WALK_TO_CHEST -> {
                 Vec3d target = new Vec3d(chestPos.getX() + 0.5, chestPos.getY(), chestPos.getZ() + 0.5);
                 if (navigator.tick(target)) {
+                    debug("Arrived at chest, opening it.");
                     state = State.OPEN_CHEST;
                 }
             }
@@ -133,7 +135,7 @@ public class BessaKitMod implements ClientModInitializer {
                     waitTimer = 5; // give the server a couple ticks to sync the screen
                     state = State.TAKE_ITEM;
                 } else {
-                    // couldn't open it (moved, obstructed, etc) - bail this request
+                    debug("Could not open the chest (moved, obstructed, or not a chest anymore). Aborting this request.");
                     resetToCooldown();
                 }
             }
@@ -144,15 +146,18 @@ public class BessaKitMod implements ClientModInitializer {
                     break;
                 }
                 if (!(player.currentScreenHandler instanceof GenericContainerScreenHandler handler)) {
+                    debug("Chest screen never opened server-side. Aborting this request.");
                     resetToCooldown();
                     break;
                 }
                 ItemStack slotStack = handler.getSlot(BessaKitConfig.KIT_SLOT_INDEX).getStack();
                 if (slotStack.isEmpty()) {
+                    debug("Kit slot " + BessaKitConfig.KIT_SLOT_INDEX + " is empty. Aborting this request.");
                     resetToCooldown();
                     break;
                 }
                 itemToDrop = slotStack.copy();
+                debug("Took item from chest: " + itemToDrop.getItem());
                 // shift-click: moves the stack straight into the player's inventory
                 client.interactionManager.clickSlot(
                         handler.syncId, BessaKitConfig.KIT_SLOT_INDEX, 0,
@@ -162,6 +167,7 @@ public class BessaKitMod implements ClientModInitializer {
 
             case CLOSE_CHEST -> {
                 player.closeHandledScreen();
+                debug("Requesting tpa to " + currentTarget);
                 state = State.REQUEST_TP;
             }
 
@@ -170,12 +176,14 @@ public class BessaKitMod implements ClientModInitializer {
                 sendCommand("w " + currentTarget + " Your Bessakit is ready! Accept the tp to get it.");
                 lastPos = player.getPos();
                 waitTimer = BessaKitConfig.TP_TIMEOUT_TICKS;
+                debug("Waiting for " + currentTarget + " to accept tpa (timeout " + (BessaKitConfig.TP_TIMEOUT_TICKS / 20) + "s)...");
                 state = State.WAIT_FOR_TP;
             }
 
             case WAIT_FOR_TP -> {
                 Vec3d pos = player.getPos();
                 if (lastPos != null && pos.distanceTo(lastPos) > BessaKitConfig.TELEPORT_JUMP_THRESHOLD) {
+                    debug("Detected teleport! Walking to " + currentTarget + " now.");
                     navigator.reset();
                     state = State.WALK_TO_PLAYER;
                     break;
@@ -183,26 +191,28 @@ public class BessaKitMod implements ClientModInitializer {
                 lastPos = pos;
                 waitTimer--;
                 if (waitTimer <= 0) {
-                    // they never accepted - drop the request
+                    debug(currentTarget + " never accepted the tpa. Giving up on this request.");
                     itemToDrop = ItemStack.EMPTY;
                     resetToCooldown();
                 }
             }
 
             case WALK_TO_PLAYER -> {
-                PlayerListEntry entry = findPlayerEntry(client, currentTarget);
                 Vec3d targetPos = resolvePlayerPos(client, currentTarget);
                 if (targetPos == null) {
+                    debug("Lost track of " + currentTarget + " (offline or out of range). Aborting this request.");
                     resetToCooldown();
                     break;
                 }
                 if (navigator.tick(targetPos)) {
+                    debug("Reached " + currentTarget + ", dropping item.");
                     state = State.DROP_ITEM;
                 }
             }
 
             case DROP_ITEM -> {
                 dropItem(player, itemToDrop);
+                debug("Dropped item, killing self to reset.");
                 state = State.KILL_SELF;
             }
 
@@ -214,6 +224,7 @@ public class BessaKitMod implements ClientModInitializer {
 
             case WAIT_RESPAWN -> {
                 if (!player.isDead() && player.getHealth() > 0) {
+                    debug("Respawned. Ready for next request.");
                     resetToCooldown();
                 } else {
                     waitTimer--;
