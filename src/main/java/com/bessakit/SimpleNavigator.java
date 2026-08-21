@@ -2,6 +2,7 @@ package com.bessakit;
 
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.util.PlayerInput;
 import net.minecraft.util.math.Vec3d;
 
 /**
@@ -54,10 +55,6 @@ public class SimpleNavigator {
         player.setYaw((float) targetYaw);
         player.setHeadYaw((float) targetYaw);
 
-        // walk forward
-        player.input.movementForward = 1.0f;
-        player.input.movementSideways = 0.0f;
-
         // naive stuck detection: not much horizontal velocity
         boolean barelyMoving = player.getVelocity().horizontalLength() < 0.02;
         if (player.horizontalCollision || barelyMoving) {
@@ -66,10 +63,11 @@ public class SimpleNavigator {
             stuckTicks = 0;
         }
 
-        // if stuck for a bit, try jumping to hop over a 1-block obstacle
-        if (stuckTicks > 5) {
-            player.input.jump();
-        }
+        boolean shouldJump = stuckTicks > 5;
+
+        // PlayerInput is an immutable record: forward, backward, left, right, jump, sneak, sprint
+        player.input.playerInput = new PlayerInput(true, false, false, false, shouldJump, false, false);
+
         if (stuckTicks > 40) {
             // completely stuck for 2s, give up on this leg
             stopMoving(player);
@@ -80,7 +78,6 @@ public class SimpleNavigator {
     }
 
     private void stopMoving(ClientPlayerEntity player) {
-        player.input.movementForward = 0.0f;
-        player.input.movementSideways = 0.0f;
+        player.input.playerInput = new PlayerInput(false, false, false, false, false, false, false);
     }
 }
