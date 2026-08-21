@@ -3,7 +3,6 @@ package com.bessakit;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.util.math.Vec3d;
-import net.minecraft.util.math.MathHelper;
 
 /**
  * Very simple "walk toward the target" steering.
@@ -40,7 +39,7 @@ public class SimpleNavigator {
             return true; // give up so we don't walk forever
         }
 
-        Vec3d playerPos = player.getPos();
+        Vec3d playerPos = player.getEntityPos();
         double dx = target.x - playerPos.x;
         double dz = target.z - playerPos.z;
         double horizontalDist = Math.sqrt(dx * dx + dz * dz);
@@ -58,9 +57,8 @@ public class SimpleNavigator {
         // walk forward
         player.input.movementForward = 1.0f;
         player.input.movementSideways = 0.0f;
-        player.input.jumping = false;
 
-        // naive stuck detection: not much horizontal or vertical velocity
+        // naive stuck detection: not much horizontal velocity
         boolean barelyMoving = player.getVelocity().horizontalLength() < 0.02;
         if (player.horizontalCollision || barelyMoving) {
             stuckTicks++;
@@ -70,7 +68,7 @@ public class SimpleNavigator {
 
         // if stuck for a bit, try jumping to hop over a 1-block obstacle
         if (stuckTicks > 5) {
-            player.input.jumping = true;
+            player.input.jump();
         }
         if (stuckTicks > 40) {
             // completely stuck for 2s, give up on this leg
@@ -84,6 +82,5 @@ public class SimpleNavigator {
     private void stopMoving(ClientPlayerEntity player) {
         player.input.movementForward = 0.0f;
         player.input.movementSideways = 0.0f;
-        player.input.jumping = false;
     }
 }
