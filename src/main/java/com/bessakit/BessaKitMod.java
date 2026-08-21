@@ -5,7 +5,7 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.client.network.PlayerListEntry;
+import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.screen.GenericContainerScreenHandler;
 import net.minecraft.screen.slot.SlotActionType;
@@ -86,14 +86,15 @@ public class BessaKitMod implements ClientModInitializer {
 
     /**
      * Naive username extraction: assumes standard "<Name> message" chat format.
+     * Checks each online player's display name against the raw chat text.
      * Adjust this if your server uses a different chat format (prefixes, ranks, etc).
      */
     private String extractUsername(String rawMessage) {
         MinecraftClient client = MinecraftClient.getInstance();
-        if (client.player == null || client.getNetworkHandler() == null) return null;
+        if (client.world == null) return null;
 
-        for (PlayerListEntry entry : client.getNetworkHandler().getPlayerList()) {
-            String name = entry.getProfile().getName();
+        for (PlayerEntity p : client.world.getPlayers()) {
+            String name = p.getName().getString();
             if (rawMessage.contains(name)) {
                 return name;
             }
@@ -174,14 +175,14 @@ public class BessaKitMod implements ClientModInitializer {
             case REQUEST_TP -> {
                 sendCommand("tpa " + currentTarget);
                 sendCommand("w " + currentTarget + " Your Bessakit is ready! Accept the tp to get it.");
-                lastPos = player.getPos();
+                lastPos = player.getEntityPos();
                 waitTimer = BessaKitConfig.TP_TIMEOUT_TICKS;
                 debug("Waiting for " + currentTarget + " to accept tpa (timeout " + (BessaKitConfig.TP_TIMEOUT_TICKS / 20) + "s)...");
                 state = State.WAIT_FOR_TP;
             }
 
             case WAIT_FOR_TP -> {
-                Vec3d pos = player.getPos();
+                Vec3d pos = player.getEntityPos();
                 if (lastPos != null && pos.distanceTo(lastPos) > BessaKitConfig.TELEPORT_JUMP_THRESHOLD) {
                     debug("Detected teleport! Walking to " + currentTarget + " now.");
                     navigator.reset();
@@ -277,12 +278,12 @@ public class BessaKitMod implements ClientModInitializer {
 
         if (slot < 9) {
             // already in the hotbar
-            player.getInventory().selectedSlot = slot;
+            player.getInventory().setSelectedSlot(slot);
         } else if (player.currentScreenHandler != null) {
             // swap it into hotbar slot 0
             client.interactionManager.clickSlot(
                     player.currentScreenHandler.syncId, slot, 0, SlotActionType.SWAP, player);
-            player.getInventory().selectedSlot = 0;
+            player.getInventory().setSelectedSlot(0);
         }
         player.dropSelectedItem(true); // true = drop whole stack, like ctrl+Q
     }
@@ -294,19 +295,11 @@ public class BessaKitMod implements ClientModInitializer {
         }
     }
 
-    private PlayerListEntry findPlayerEntry(MinecraftClient client, String name) {
-        if (client.getNetworkHandler() == null) return null;
-        for (PlayerListEntry entry : client.getNetworkHandler().getPlayerList()) {
-            if (entry.getProfile().getName().equalsIgnoreCase(name)) return entry;
-        }
-        return null;
-    }
-
     private Vec3d resolvePlayerPos(MinecraftClient client, String name) {
         if (client.world == null) return null;
-        for (net.minecraft.entity.player.PlayerEntity p : client.world.getPlayers()) {
-            if (p.getGameProfile().getName().equalsIgnoreCase(name)) {
-                return p.getPos();
+        for (PlayerEntity p : client.world.getPlayers()) {
+            if (p.getName().getString().equalsIgnoreCase(name)) {
+                return p.getEntityPos();
             }
         }
         return null;
