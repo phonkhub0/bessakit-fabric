@@ -29,8 +29,6 @@ public class BessaKitMod implements ClientModInitializer {
         CLOSE_CHEST,
         REQUEST_TP,
         WAIT_FOR_TP,
-        WALK_TO_PLAYER,
-        DROP_ITEM,
         KILL_SELF,
         WAIT_RESPAWN,
         COOLDOWN
@@ -205,9 +203,10 @@ public class BessaKitMod implements ClientModInitializer {
             case WAIT_FOR_TP -> {
                 Vec3d pos = player.getEntityPos();
                 if (lastPos != null && pos.distanceTo(lastPos) > BessaKitConfig.TELEPORT_JUMP_THRESHOLD) {
-                    debug("Detected teleport! Walking to " + currentTarget + " now.");
-                    navigator.reset();
-                    state = State.WALK_TO_PLAYER;
+                    // Teleport landed - kill immediately so the kit drops here,
+                    // right next to the player who just teleported to us.
+                    debug("Detected teleport! Killing to drop the kit.");
+                    state = State.KILL_SELF;
                     break;
                 }
                 lastPos = pos;
@@ -217,25 +216,6 @@ public class BessaKitMod implements ClientModInitializer {
                     itemToDrop = ItemStack.EMPTY;
                     resetToCooldown();
                 }
-            }
-
-            case WALK_TO_PLAYER -> {
-                Vec3d targetPos = resolvePlayerPos(client, currentTarget);
-                if (targetPos == null) {
-                    debug("Lost track of " + currentTarget + " (offline or out of range). Aborting this request.");
-                    resetToCooldown();
-                    break;
-                }
-                if (navigator.tick(targetPos)) {
-                    debug("Reached " + currentTarget + ", dropping item.");
-                    state = State.DROP_ITEM;
-                }
-            }
-
-            case DROP_ITEM -> {
-                dropItem(player, itemToDrop);
-                debug("Dropped item, killing self to reset.");
-                state = State.KILL_SELF;
             }
 
             case KILL_SELF -> {
@@ -282,47 +262,10 @@ public class BessaKitMod implements ClientModInitializer {
         return true;
     }
 
-    private void dropItem(ClientPlayerEntity player, ItemStack stack) {
-        if (stack.isEmpty()) return;
-        MinecraftClient client = MinecraftClient.getInstance();
-
-        // find a matching stack in the player's inventory
-        int slot = -1;
-        for (int i = 0; i < player.getInventory().size(); i++) {
-            ItemStack s = player.getInventory().getStack(i);
-            if (!s.isEmpty() && s.getItem() == stack.getItem()) {
-                slot = i;
-                break;
-            }
-        }
-        if (slot == -1) return; // don't have it anymore for some reason
-
-        if (slot < 9) {
-            // already in the hotbar
-            player.getInventory().setSelectedSlot(slot);
-        } else if (player.currentScreenHandler != null) {
-            // swap it into hotbar slot 0
-            client.interactionManager.clickSlot(
-                    player.currentScreenHandler.syncId, slot, 0, SlotActionType.SWAP, player);
-            player.getInventory().setSelectedSlot(0);
-        }
-        player.dropSelectedItem(true); // true = drop whole stack, like ctrl+Q
-    }
-
     private void sendCommand(String command) {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.getNetworkHandler() != null) {
             client.getNetworkHandler().sendChatCommand(command);
         }
-    }
-
-    private Vec3d resolvePlayerPos(MinecraftClient client, String name) {
-        if (client.world == null) return null;
-        for (PlayerEntity p : client.world.getPlayers()) {
-            if (p.getName().getString().equalsIgnoreCase(name)) {
-                return p.getEntityPos();
-            }
-        }
-        return null;
     }
 }
