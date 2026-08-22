@@ -85,11 +85,29 @@ public class BessaKitMod implements ClientModInitializer {
     }
 
     /**
-     * Naive username extraction: assumes standard "<Name> message" chat format.
-     * Checks each online player's display name against the raw chat text.
-     * Adjust this if your server uses a different chat format (prefixes, ranks, etc).
+     * Extracts the sender's username directly from the chat line's own format,
+     * rather than relying on the world's list of loaded player entities (which
+     * only contains players rendered nearby - a message from someone far away
+     * would never match that way).
+     *
+     * Expected formats (based on this server's chat style):
+     *   "bessagoncc » message"
+     *   "[ELITE] bessagoncc » message"
+     *   "[APEX] bessagoncc » message"
+     *
+     * Adjust USERNAME_PATTERN below if your server's chat format differs.
      */
+    private static final Pattern USERNAME_PATTERN = Pattern.compile(
+            "^(?:\\[[^\\]]+\\]\\s*)?([A-Za-z0-9_]{2,16})\\s*»");
+
     private String extractUsername(String rawMessage) {
+        var matcher = USERNAME_PATTERN.matcher(rawMessage.trim());
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+
+        // Fallback: check against nearby loaded player entities, in case the
+        // chat format doesn't match the pattern above for some messages.
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.world == null) return null;
 
