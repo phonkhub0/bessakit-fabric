@@ -24,8 +24,12 @@ jobs:
       - name: Build
         run: gradle build --no-daemon
 
+      - name: List build outputs
+        run: find build -name "*.jar" || echo "no jars found"
+
       - name: Upload jar
         uses: actions/upload-artifact@v4
         with:
           name: bessakit-kitbot-jar
           path: build/libs/*.jar
+          if-no-files-found: error
