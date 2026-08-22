@@ -113,7 +113,10 @@ public class BessaKitMod implements ClientModInitializer {
                     debug("Starting delivery for " + currentTarget + ", searching for chest named '" + BessaKitConfig.CHEST_NAME + "'...");
                     chestPos = ChestFinder.findKitsChest();
                     if (chestPos == null) {
-                        debug("No chest named '" + BessaKitConfig.CHEST_NAME + "' found within " + BessaKitConfig.CHEST_SEARCH_RADIUS + " blocks. Aborting this request.");
+                        debug("No chest named '" + BessaKitConfig.CHEST_NAME + "' found within " + BessaKitConfig.CHEST_SEARCH_RADIUS + " blocks. Diagnostic scan follows:");
+                        for (String line : ChestFinder.debugScanChests()) {
+                            debug(line);
+                        }
                         currentTarget = null;
                         break;
                     }
