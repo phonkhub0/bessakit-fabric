@@ -23,22 +23,24 @@ public final class ChestFinder {
     private static final int VERTICAL_RADIUS = 8;
 
     /**
-     * Finds the "kits" chest two ways:
-     *  1. A chest with an anvil-set custom name matching CHEST_NAME (only
-     *     possible if the chest was renamed via anvil BEFORE being placed -
-     *     chests can't be renamed after placement).
-     *  2. A sign anywhere near the chest whose text contains CHEST_NAME,
-     *     with the chest itself adjacent to that sign - much easier to set
-     *     up: just place a sign on or next to the chest and write "kits" on it.
+     * Finds the chest matching the given label two ways:
+     *  1. A chest with an anvil-set custom name matching the label exactly
+     *     (only possible if the chest was renamed via anvil BEFORE being
+     *     placed - chests can't be renamed after placement).
+     *  2. A sign anywhere near the chest whose text contains the label -
+     *     much easier to set up: just place a sign on or next to the chest
+     *     and write the label on it, e.g. "kits pvp".
      * Returns the nearest match from either method, or null if neither finds anything.
+     *
+     * @param label the chest/sign label to search for, e.g. "kits" or "kits pvp"
      */
-    public static BlockPos findKitsChest() {
-        BlockPos viaName = findKitsChestViaCustomName();
+    public static BlockPos findKitsChest(String label) {
+        BlockPos viaName = findKitsChestViaCustomName(label);
         if (viaName != null) return viaName;
-        return findKitsChestViaSign();
+        return findKitsChestViaSign(label);
     }
 
-    private static BlockPos findKitsChestViaCustomName() {
+    private static BlockPos findKitsChestViaCustomName(String label) {
         MinecraftClient client = MinecraftClient.getInstance();
         ClientWorld world = client.world;
         ClientPlayerEntity player = client.player;
@@ -65,7 +67,7 @@ public final class ChestFinder {
                     if (!chest.hasCustomName()) continue;
 
                     String name = chest.getDisplayName().getString();
-                    if (name.equalsIgnoreCase(BessaKitConfig.CHEST_NAME)) {
+                    if (name.equalsIgnoreCase(label)) {
                         candidates.add(pos.toImmutable());
                     }
                 }
@@ -76,7 +78,7 @@ public final class ChestFinder {
         return candidates.isEmpty() ? null : candidates.get(0);
     }
 
-    private static BlockPos findKitsChestViaSign() {
+    private static BlockPos findKitsChestViaSign(String label) {
         MinecraftClient client = MinecraftClient.getInstance();
         ClientWorld world = client.world;
         ClientPlayerEntity player = client.player;
@@ -98,7 +100,7 @@ public final class ChestFinder {
                     BlockEntity be = world.getBlockEntity(pos);
                     if (!(be instanceof SignBlockEntity sign)) continue;
 
-                    if (!signMatches(sign)) continue;
+                    if (!signMatches(sign, label)) continue;
 
                     // check all 6 neighbors for a chest
                     for (Direction dir : Direction.values()) {
@@ -116,19 +118,27 @@ public final class ChestFinder {
         return candidates.isEmpty() ? null : candidates.get(0);
     }
 
-    private static boolean signMatches(SignBlockEntity sign) {
-        return textContains(sign.getFrontText().getMessages(false))
-                || textContains(sign.getBackText().getMessages(false));
+    private static boolean signMatches(SignBlockEntity sign, String label) {
+        return textMatches(sign.getFrontText().getMessages(false), label)
+                || textMatches(sign.getBackText().getMessages(false), label);
     }
 
-    private static boolean textContains(Text[] lines) {
+    /**
+     * Joins all non-blank sign lines into one string and checks it against the
+     * label. This lets a label like "kits pvp" match a sign with "kits" on one
+     * line and "pvp" on the next, not just a single line containing both words.
+     */
+    private static boolean textMatches(Text[] lines, String label) {
+        StringBuilder combined = new StringBuilder();
         for (Text line : lines) {
-            if (line.getString().equalsIgnoreCase(BessaKitConfig.CHEST_NAME)
-                    || line.getString().toLowerCase().contains(BessaKitConfig.CHEST_NAME.toLowerCase())) {
-                return true;
+            String s = line.getString().trim();
+            if (!s.isEmpty()) {
+                if (combined.length() > 0) combined.append(" ");
+                combined.append(s);
             }
         }
-        return false;
+        String joined = combined.toString().toLowerCase();
+        return joined.equals(label.toLowerCase()) || joined.contains(label.toLowerCase());
     }
 
     /**
