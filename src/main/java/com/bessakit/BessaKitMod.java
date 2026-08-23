@@ -3,6 +3,7 @@ package com.bessakit;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
+import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.player.PlayerEntity;
@@ -18,6 +19,7 @@ import net.minecraft.text.Text;
 import java.util.LinkedList;
 import java.util.Queue;
 import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 
 public class BessaKitMod implements ClientModInitializer {
 
@@ -34,22 +36,39 @@ public class BessaKitMod implements ClientModInitializer {
         COOLDOWN
     }
 
+    /** A single queued delivery: who asked, and which kit type (null = default "kits"). */
+    private record Request(String username, String kitType) {}
+
+    /**
+     * Matches any trigger phrase, optionally followed by whitespace and one of
+     * the known kit type keywords. Example matches:
+     *   "##bessakit"            -> type = null (default)
+     *   "~bessakit pvp"         -> type = "pvp"
+     *   "$bessakit Cats"        -> type = "cats"
+     */
     private static final Pattern TRIGGER = buildTriggerPattern();
 
     private static Pattern buildTriggerPattern() {
-        StringBuilder regex = new StringBuilder();
+        StringBuilder phrases = new StringBuilder();
         for (int i = 0; i < BessaKitConfig.TRIGGER_PHRASES.length; i++) {
-            if (i > 0) regex.append("|");
-            regex.append(Pattern.quote(BessaKitConfig.TRIGGER_PHRASES[i]));
+            if (i > 0) phrases.append("|");
+            phrases.append(Pattern.quote(BessaKitConfig.TRIGGER_PHRASES[i]));
         }
-        return Pattern.compile(regex.toString(), Pattern.CASE_INSENSITIVE);
+        StringBuilder types = new StringBuilder();
+        for (int i = 0; i < BessaKitConfig.KIT_TYPES.length; i++) {
+            if (i > 0) types.append("|");
+            types.append(Pattern.quote(BessaKitConfig.KIT_TYPES[i]));
+        }
+        String regex = "(?:" + phrases + ")(?:\\s+(" + types + "))?";
+        return Pattern.compile(regex, Pattern.CASE_INSENSITIVE);
     }
 
-    private final Queue<String> requestQueue = new LinkedList<>();
+    private final Queue<Request> requestQueue = new LinkedList<>();
     private final SimpleNavigator navigator = new SimpleNavigator();
 
     private State state = State.IDLE;
-    private String currentTarget = null;
+    private Request currentRequest = null;
+    private String currentChestLabel = null;
     private BlockPos chestPos = null;
     private ItemStack itemToDrop = ItemStack.EMPTY;
     private int waitTimer = 0;
@@ -57,25 +76,65 @@ public class BessaKitMod implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
-        debug("Mod loaded, watching for: " + String.join(", ", BessaKitConfig.TRIGGER_PHRASES));
+        debug("Mod loaded, watching for: " + String.join(", ", BessaKitConfig.TRIGGER_PHRASES)
+                + " (optionally followed by a kit type: " + String.join(", ", BessaKitConfig.KIT_TYPES) + ")");
+        debug("Cooldown: 2 kits per 30 min per player (except whitelisted). Use /whitekit <player> and /blackkit <player> to manage the whitelist.");
 
-        // Listen for the trigger phrase in chat
         ClientReceiveMessageEvents.ALLOW_GAME.register((message, overlay) -> {
             String text = message.getString();
             if (text.startsWith("[BessaKit]")) return true; // never process our own debug output
 
             debug("Saw chat line: " + text);
-            if (TRIGGER.matcher(text).find()) {
-                debug("Trigger matched!");
+            Matcher matcher = TRIGGER.matcher(text);
+            if (matcher.find()) {
+                String kitType = matcher.group(1);
+                debug("Trigger matched! kitType=" + (kitType == null ? "(default)" : kitType));
                 String username = extractUsername(text);
-                if (username != null) {
-                    debug("Resolved sender as: " + username + " (queued)");
-                    requestQueue.add(username);
-                } else {
+                if (username == null) {
                     debug("Could NOT resolve a username from that message - no online player name found inside it.");
+                } else if (!CooldownManager.canOrder(username)) {
+                    long remainingMin = CooldownManager.remainingCooldownMs(username) / 60000 + 1;
+                    debug(username + " is on cooldown - " + remainingMin + " more minute(s) before they can order again.");
+                    sendCommand("w " + username + " You're on cooldown! Try again in about " + remainingMin + " minute(s).");
+                } else {
+                    debug("Resolved sender as: " + username + " (queued, kit=" + BessaKitConfig.chestLabelFor(kitType) + ")");
+                    CooldownManager.recordOrder(username);
+                    requestQueue.add(new Request(username, kitType));
                 }
             }
             return true; // don't block the message from showing
+        });
+
+        // Local-only commands: /whitekit <player> and /blackkit <player>.
+        // Intercepted here and never actually sent to the server.
+        ClientSendMessageEvents.ALLOW_COMMAND.register(command -> {
+            String trimmed = command.trim();
+            String[] parts = trimmed.split("\\s+", 2);
+            String cmd = parts[0].toLowerCase();
+
+            if (cmd.equals("whitekit")) {
+                if (parts.length < 2 || parts[1].isBlank()) {
+                    debug("Usage: /whitekit <player>");
+                } else {
+                    String target = parts[1].trim();
+                    CooldownManager.whitelist(target);
+                    debug("Whitelisted " + target + " - they now have unlimited kits, no cooldown.");
+                }
+                return false; // don't send to the server
+            }
+
+            if (cmd.equals("blackkit")) {
+                if (parts.length < 2 || parts[1].isBlank()) {
+                    debug("Usage: /blackkit <player>");
+                } else {
+                    String target = parts[1].trim();
+                    CooldownManager.blacklist(target);
+                    debug("Removed " + target + " from the kit whitelist - normal cooldown applies again.");
+                }
+                return false; // don't send to the server
+            }
+
+            return true; // any other command goes to the server as normal
         });
 
         ClientTickEvents.END_CLIENT_TICK.register(this::tick);
@@ -107,7 +166,7 @@ public class BessaKitMod implements ClientModInitializer {
             "^(?:\\[[^\\]]+\\]\\s*)?([A-Za-z0-9_]{2,16})\\s*»");
 
     private String extractUsername(String rawMessage) {
-        var matcher = USERNAME_PATTERN.matcher(rawMessage.trim());
+        Matcher matcher = USERNAME_PATTERN.matcher(rawMessage.trim());
         if (matcher.find()) {
             return matcher.group(1);
         }
@@ -133,15 +192,16 @@ public class BessaKitMod implements ClientModInitializer {
         switch (state) {
             case IDLE -> {
                 if (!requestQueue.isEmpty()) {
-                    currentTarget = requestQueue.poll();
-                    debug("Starting delivery for " + currentTarget + ", searching for chest named '" + BessaKitConfig.CHEST_NAME + "'...");
-                    chestPos = ChestFinder.findKitsChest();
+                    currentRequest = requestQueue.poll();
+                    currentChestLabel = BessaKitConfig.chestLabelFor(currentRequest.kitType());
+                    debug("Starting delivery for " + currentRequest.username() + ", searching for chest/sign labeled '" + currentChestLabel + "'...");
+                    chestPos = ChestFinder.findKitsChest(currentChestLabel);
                     if (chestPos == null) {
-                        debug("No chest named '" + BessaKitConfig.CHEST_NAME + "' found within " + BessaKitConfig.CHEST_SEARCH_RADIUS + " blocks. Diagnostic scan follows:");
+                        debug("No chest/sign labeled '" + currentChestLabel + "' found within " + BessaKitConfig.CHEST_SEARCH_RADIUS + " blocks. Diagnostic scan follows:");
                         for (String line : ChestFinder.debugScanChests()) {
                             debug(line);
                         }
-                        currentTarget = null;
+                        currentRequest = null;
                         break;
                     }
                     debug("Found chest at " + chestPos + ", walking there.");
@@ -195,16 +255,16 @@ public class BessaKitMod implements ClientModInitializer {
 
             case CLOSE_CHEST -> {
                 player.closeHandledScreen();
-                debug("Requesting tpa to " + currentTarget);
+                debug("Requesting tpa to " + currentRequest.username());
                 state = State.REQUEST_TP;
             }
 
             case REQUEST_TP -> {
-                sendCommand("tpa " + currentTarget);
-                sendCommand("w " + currentTarget + " Your Bessakit is ready! Accept the tp to get it.");
+                sendCommand("tpa " + currentRequest.username());
+                sendCommand("w " + currentRequest.username() + " Your Bessakit is ready! Accept the tp to get it.");
                 lastPos = player.getEntityPos();
                 waitTimer = BessaKitConfig.TP_TIMEOUT_TICKS;
-                debug("Waiting for " + currentTarget + " to accept tpa (timeout " + (BessaKitConfig.TP_TIMEOUT_TICKS / 20) + "s)...");
+                debug("Waiting for " + currentRequest.username() + " to accept tpa (timeout " + (BessaKitConfig.TP_TIMEOUT_TICKS / 20) + "s)...");
                 state = State.WAIT_FOR_TP;
             }
 
@@ -220,7 +280,7 @@ public class BessaKitMod implements ClientModInitializer {
                 lastPos = pos;
                 waitTimer--;
                 if (waitTimer <= 0) {
-                    debug(currentTarget + " never accepted the tpa. Giving up on this request.");
+                    debug(currentRequest.username() + " never accepted the tpa. Giving up on this request.");
                     itemToDrop = ItemStack.EMPTY;
                     resetToCooldown();
                 }
@@ -245,7 +305,8 @@ public class BessaKitMod implements ClientModInitializer {
             case COOLDOWN -> {
                 waitTimer--;
                 if (waitTimer <= 0) {
-                    currentTarget = null;
+                    currentRequest = null;
+                    currentChestLabel = null;
                     chestPos = null;
                     itemToDrop = ItemStack.EMPTY;
                     state = State.IDLE;
