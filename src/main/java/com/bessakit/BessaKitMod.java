@@ -34,8 +34,16 @@ public class BessaKitMod implements ClientModInitializer {
         COOLDOWN
     }
 
-    private static final Pattern TRIGGER = Pattern.compile(
-            Pattern.quote(BessaKitConfig.TRIGGER_PHRASE), Pattern.CASE_INSENSITIVE);
+    private static final Pattern TRIGGER = buildTriggerPattern();
+
+    private static Pattern buildTriggerPattern() {
+        StringBuilder regex = new StringBuilder();
+        for (int i = 0; i < BessaKitConfig.TRIGGER_PHRASES.length; i++) {
+            if (i > 0) regex.append("|");
+            regex.append(Pattern.quote(BessaKitConfig.TRIGGER_PHRASES[i]));
+        }
+        return Pattern.compile(regex.toString(), Pattern.CASE_INSENSITIVE);
+    }
 
     private final Queue<String> requestQueue = new LinkedList<>();
     private final SimpleNavigator navigator = new SimpleNavigator();
@@ -49,7 +57,7 @@ public class BessaKitMod implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
-        debug("Mod loaded, watching for " + BessaKitConfig.TRIGGER_PHRASE);
+        debug("Mod loaded, watching for: " + String.join(", ", BessaKitConfig.TRIGGER_PHRASES));
 
         // Listen for the trigger phrase in chat
         ClientReceiveMessageEvents.ALLOW_GAME.register((message, overlay) -> {
