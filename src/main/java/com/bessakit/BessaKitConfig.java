@@ -9,8 +9,19 @@ public final class BessaKitConfig {
     /** Chat phrases (case-insensitive) that trigger a delivery. Any one of these matching is enough. */
     public static final String[] TRIGGER_PHRASES = { "##bessakit", "$bessakit", "~bessakit" };
 
-    /** The container title the chest must have (rename it via anvil). */
+    /** Recognized kit type keywords. A trigger phrase can optionally be followed by one of these. */
+    public static final String[] KIT_TYPES = {
+            "pvp", "illegal", "map", "pickaxe", "toothpick", "safemaps", "qbasty", "bessa", "cats"
+    };
+
+    /** Base label used for the default/no-type request. Typed requests become "kits <type>", e.g. "kits pvp". */
     public static final String CHEST_NAME = "kits";
+
+    /** Builds the sign/chest label to search for, given an optional kit type (null = default). */
+    public static String chestLabelFor(String kitType) {
+        if (kitType == null || kitType.isBlank()) return CHEST_NAME;
+        return CHEST_NAME + " " + kitType.toLowerCase();
+    }
 
     /** Which slot in the chest to take from. 0 = first slot. */
     public static final int KIT_SLOT_INDEX = 0;
