@@ -6,8 +6,8 @@ package com.bessakit;
 public final class BessaKitConfig {
     private BessaKitConfig() {}
 
-    /** Chat phrase (case-insensitive) that triggers a delivery. */
-    public static final String TRIGGER_PHRASE = "##bessakit";
+    /** Chat phrases (case-insensitive) that trigger a delivery. Any one of these matching is enough. */
+    public static final String[] TRIGGER_PHRASES = { "##bessakit", "$bessakit", "~bessakit" };
 
     /** The container title the chest must have (rename it via anvil). */
     public static final String CHEST_NAME = "kits";
