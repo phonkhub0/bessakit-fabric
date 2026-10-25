@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "bessakit-kitbot",
+  "version": "${version}",
+  "name": "BessaKit KitBot",
+  "description": "Watches chat for ##bessakit and auto-delivers a kit from a chest named 'kits'.",
+  "authors": [],
+  "contact": {},
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "com.bessakit.BessaKitMod"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.18.0",
+    "fabric-api": "*",
+    "minecraft": "~1.21.11",
+    "java": ">=21"
+  }
+}
